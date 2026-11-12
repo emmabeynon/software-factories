@@ -41,6 +41,9 @@ interface SidebarProps {
   currentUser: CurrentUser | null;
   recentCourses?: RecentCourse[];
   isTeamAdmin?: boolean;
+  // PROTOTYPE: slot at the top of the nav, and per-route unread badges
+  extraNav?: React.ReactNode;
+  badges?: Record<string, number>;
 }
 
 interface NavItem {
@@ -117,6 +120,8 @@ export function Sidebar({
   currentUser,
   recentCourses = [],
   isTeamAdmin = false,
+  extraNav,
+  badges = {},
 }: SidebarProps) {
   const currentUserRole = currentUser?.role ?? null;
   const [isDark, setIsDark] = useState(false);
@@ -143,6 +148,7 @@ export function Sidebar({
       </div>
 
       <nav className="flex-1 space-y-1 p-3">
+        {extraNav}
         {navItems
           .filter((item) => isVisible(item, currentUserRole))
           .map((item) => (
@@ -160,6 +166,11 @@ export function Sidebar({
             >
               {item.icon}
               {item.label}
+              {badges[item.to] ? (
+                <span className="ml-auto rounded-full bg-red-500 px-1.5 text-xs font-semibold text-white">
+                  {badges[item.to]}
+                </span>
+              ) : null}
             </NavLink>
           ))}
         {isTeamAdmin && (
@@ -176,6 +187,11 @@ export function Sidebar({
           >
             <UsersRound className="size-4" />
             Team
+            {badges["/team"] ? (
+              <span className="ml-auto rounded-full bg-red-500 px-1.5 text-xs font-semibold text-white">
+                {badges["/team"]}
+              </span>
+            ) : null}
           </NavLink>
         )}
       </nav>
