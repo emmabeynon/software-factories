@@ -16,12 +16,11 @@ import { data, isRouteErrorResponse, Link } from "react-router";
 import { db } from "~/db";
 import {
   defaultNotifications,
-  syncNotificationUser,
+  introduceToNotifications,
 } from "~/lib/notifications.server";
 import { eq } from "drizzle-orm";
 import { formatPrice } from "~/lib/utils";
 import { listRefundRequestsForBuyer } from "~/lib/refunds.server";
-import type { NotificationCategory } from "~/lib/notifications.server";
 import {
   NOTIFICATION_CATEGORIES,
   getNotificationPreferenceSwitches,
@@ -30,7 +29,7 @@ import {
 } from "~/lib/notification-preferences.server";
 
 const preferenceSchema = z.object({
-  category: z.enum(NOTIFICATION_CATEGORIES as [string, ...string[]]),
+  category: z.enum(NOTIFICATION_CATEGORIES),
   enabled: z.enum(["true", "false"]),
 });
 
@@ -111,13 +110,14 @@ export async function action({ request }: Route.ActionArgs) {
       await setNotificationPreference(
         await defaultNotifications(),
         currentUser.id,
-        parsedPreference.data.category as NotificationCategory,
+        parsedPreference.data.category,
         parsedPreference.data.enabled === "true"
       );
     } catch (error) {
       console.error("[notifications] saving preference failed", error);
-      // Returned, not thrown: a thrown response would replace the whole page
-      // with the error boundary. The card toasts and the switch reverts.
+      // A deliberate exception to "fail with a thrown response": a thrown
+      // response would replace the whole page with the error boundary, but a
+      // failed switch should only toast and revert. So it is returned.
       return data({ preferenceError: true }, { status: 502 });
     }
     return { preferenceSaved: true };
@@ -137,7 +137,7 @@ export async function action({ request }: Route.ActionArgs) {
     .where(eq(users.id, currentUser.id))
     .returning()
     .get();
-  await syncNotificationUser(await defaultNotifications(), updated);
+  await introduceToNotifications(updated);
   return { success: true };
 }
 

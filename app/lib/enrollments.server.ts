@@ -3,6 +3,8 @@ import { courses, enrollments, users } from "~/db/schema";
 import {
   bestEffort,
   defaultNotifications,
+  idempotencyKey,
+  notifiable,
   type NotificationPort,
 } from "~/lib/notifications.server";
 import type { Db } from "~/lib/refunds.server";
@@ -48,16 +50,9 @@ export function announceEnrollment(
     await port.trigger({
       kind: "enrollment-created",
       category: "enrollments",
-      recipients: [
-        {
-          id: instructor.id,
-          name: instructor.name,
-          email: instructor.email,
-          avatarUrl: instructor.avatarUrl,
-        },
-      ],
+      recipients: [notifiable(instructor)],
       actorId: student.id,
-      idempotencyKey: "enrollment-created:" + enrollment.id,
+      idempotencyKey: idempotencyKey("enrollment-created", enrollment.id),
       data: {
         enrollmentId: enrollment.id,
         studentName: student.name,

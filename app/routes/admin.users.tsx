@@ -8,8 +8,7 @@ import { parseFormData } from "~/lib/validation";
 import { UserRole, users } from "~/db/schema";
 import { db } from "~/db";
 import {
-  defaultNotifications,
-  syncNotificationUser,
+  introduceToNotifications,
 } from "~/lib/notifications.server";
 import { eq } from "drizzle-orm";
 import { Card, CardContent, CardHeader } from "~/components/ui/card";
@@ -125,7 +124,7 @@ export async function action({ request }: Route.ActionArgs) {
     const user = getUserById(userId);
     const updated = updateUser(userId, name, email, user?.bio ?? null);
     if (updated) {
-      await syncNotificationUser(await defaultNotifications(), updated);
+      await introduceToNotifications(updated);
     }
     return { success: true };
   }

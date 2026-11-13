@@ -21,6 +21,8 @@ import { formatPrice } from "~/lib/utils";
 import {
   bestEffort,
   defaultNotifications,
+  idempotencyKey,
+  notifiable,
   type NotificationPort,
 } from "~/lib/notifications.server";
 import {
@@ -367,15 +369,6 @@ export type RaiseResult =
     }
   | Failure;
 
-function notifiable(user: typeof users.$inferSelect) {
-  return {
-    id: user.id,
-    name: user.name,
-    email: user.email,
-    avatarUrl: user.avatarUrl,
-  };
-}
-
 /**
  * Confirms the request to the buyer and alerts every Platform Admin. Runs after
  * the request has committed. Admins are found by querying role = admin now, so
@@ -408,7 +401,7 @@ function announceRequest(
         category: "refund_request_updates",
         recipients: [notifiable(buyer)],
         actorId: null,
-        idempotencyKey: "refund-confirmed:" + refundRequestId,
+        idempotencyKey: idempotencyKey("refund-confirmed", refundRequestId),
         data,
       })
     );
@@ -418,14 +411,16 @@ function announceRequest(
         .select()
         .from(users)
         .where(eq(users.role, UserRole.Admin))
-        .all();
+        .all()
+        // No Notification about your own action.
+        .filter((admin) => admin.id !== buyer.id);
       if (admins.length === 0) return;
       await port.trigger({
         kind: "refund-requested",
         category: "open_refund_requests",
         recipients: admins.map(notifiable),
         actorId: buyer.id,
-        idempotencyKey: "refund-requested:" + refundRequestId,
+        idempotencyKey: idempotencyKey("refund-requested", refundRequestId),
         data: { ...data, buyerName: buyer.name, reason },
       });
     });
@@ -705,16 +700,9 @@ function announceDecision(
     await port.trigger({
       kind,
       category: "refund_request_updates",
-      recipients: [
-        {
-          id: buyer.id,
-          name: buyer.name,
-          email: buyer.email,
-          avatarUrl: buyer.avatarUrl,
-        },
-      ],
+      recipients: [notifiable(buyer)],
       actorId: platformAdminId,
-      idempotencyKey: kind + ":" + refundRequestId,
+      idempotencyKey: idempotencyKey(kind, refundRequestId),
       data: {
         refundRequestId,
         purchaseId: purchase.id,

@@ -4,6 +4,8 @@ import { announceEnrollment } from "~/lib/enrollments.server";
 import {
   bestEffort,
   defaultNotifications,
+  idempotencyKey,
+  notifiable,
   type NotificationPort,
 } from "~/lib/notifications.server";
 import { getSeatAvailability, type Db } from "~/lib/refunds.server";
@@ -152,16 +154,9 @@ function announceSeatClaim(
     await port.trigger({
       kind: "seat-claimed",
       category: "seat_claims",
-      recipients: [
-        {
-          id: teamAdmin.id,
-          name: teamAdmin.name,
-          email: teamAdmin.email,
-          avatarUrl: teamAdmin.avatarUrl,
-        },
-      ],
+      recipients: [notifiable(teamAdmin)],
       actorId: claimer.id,
-      idempotencyKey: "seat-claimed:" + coupon.id,
+      idempotencyKey: idempotencyKey("seat-claimed", coupon.id),
       data: {
         couponId: coupon.id,
         purchaseId: purchase.id,

@@ -87,7 +87,7 @@ describe("presentNotification", () => {
     });
     expect(row).toEqual({
       category: "refund",
-      title: "Sam requested a refund",
+      title: "Sam raised a Refund Request",
       snippet: "TypeScript Pro · $79.00 · Not for me",
       destination: "/admin/refunds",
     });

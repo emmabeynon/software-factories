@@ -17,9 +17,14 @@ export const NOTIFICATION_CATEGORY_LABELS: Record<NotificationCategory, string> 
     discussion_replies: "Discussion Replies",
   };
 
-export const NOTIFICATION_CATEGORIES = Object.keys(
-  NOTIFICATION_CATEGORY_LABELS
-) as NotificationCategory[];
+export const NOTIFICATION_CATEGORIES = [
+  "refund_request_updates",
+  "open_refund_requests",
+  "seat_claims",
+  "enrollments",
+  "discussion_questions",
+  "discussion_replies",
+] as const satisfies readonly NotificationCategory[];
 
 export type PreferenceSwitch = {
   category: NotificationCategory;

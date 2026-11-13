@@ -3,6 +3,8 @@ import { comments, courses, lessons, modules, users } from "~/db/schema";
 import {
   bestEffort,
   defaultNotifications,
+  idempotencyKey,
+  notifiable,
   type NotificationPort,
 } from "~/lib/notifications.server";
 import type { Db } from "~/lib/refunds.server";
@@ -59,13 +61,14 @@ function announceComment(
     if (!context) return;
     const { course, lessonTitle } = context;
 
-    const isReply = comment.parentId !== null;
+    const { parentId } = comment;
+    const isReply = parentId !== null;
     let recipientId = course.instructorId;
-    if (isReply) {
+    if (parentId !== null) {
       const question = db
         .select()
         .from(comments)
-        .where(eq(comments.id, comment.parentId!))
+        .where(eq(comments.id, parentId))
         .get();
       if (!question) return;
       recipientId = question.userId;
@@ -89,16 +92,9 @@ function announceComment(
     await port.trigger({
       kind,
       category: isReply ? "discussion_replies" : "discussion_questions",
-      recipients: [
-        {
-          id: recipient.id,
-          name: recipient.name,
-          email: recipient.email,
-          avatarUrl: recipient.avatarUrl,
-        },
-      ],
+      recipients: [notifiable(recipient)],
       actorId: author.id,
-      idempotencyKey: `${kind}:${comment.id}`,
+      idempotencyKey: idempotencyKey(kind, comment.id),
       data: {
         commentId: comment.id,
         lessonId: comment.lessonId,
