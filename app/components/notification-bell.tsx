@@ -27,12 +27,27 @@ import {
 // below and nothing else here knows Knock. With no config (no Knock keys) the
 // feed simply stays empty.
 
+/** Feed writes are best-effort: a failed one is logged, never thrown into the UI. */
+function logFeedError(action: string) {
+  return (error: unknown) =>
+    console.error(`[notification feed] ${action} failed`, error);
+}
+
 const categoryIcon: Record<FeedCategory, React.ReactNode> = {
   discussion: <MessageSquare />,
   refund: <Receipt />,
   team: <UsersRound />,
   enrollment: <GraduationCap />,
 };
+
+/** Asks the server for a new token; refuses one issued for a different user. */
+async function refreshFeedToken(userId: string): Promise<string> {
+  const response = await fetch("/api/notification-token");
+  if (!response.ok) throw new Error(`token refresh ${response.status}`);
+  const body: { userId: string; userToken: string } = await response.json();
+  if (body.userId !== userId) throw new Error("session user changed");
+  return body.userToken;
+}
 
 /** One live connection per signed-in user, rebuilt when the user (or token) changes. */
 function useNotificationFeed(config: NotificationFeedConfig | null) {
@@ -51,7 +66,9 @@ function useNotificationFeed(config: NotificationFeedConfig | null) {
     let unsubscribe: (() => void) | undefined;
 
     import("~/lib/knock-feed-client")
-      .then(({ createKnockFeedClient }) => createKnockFeedClient(config))
+      .then(({ createKnockFeedClient }) => 
+        createKnockFeedClient(config, () => refreshFeedToken(config.userId))
+      )
       .then((next) => {
         if (cancelled) {
           next.close();
@@ -102,7 +119,7 @@ export function NotificationBell({
     const next = !open;
     setOpen(next);
     // Opening marks everything seen (clears the badge); rows stay unread.
-    if (next) void client?.markAllSeen();
+    if (next) void client?.markAllSeen().catch(logFeedError("mark seen"));
   }
 
   return (
@@ -161,7 +178,7 @@ function FeedPopover({
   }, [client, state.hasMore, state.notifications.length]);
 
   function openRow(notification: FeedNotification) {
-    void client?.markRead(notification.id);
+    void client?.markRead(notification.id).catch(logFeedError("mark read"));
     // Nowhere to go: only mark it read and leave the popover open.
     if (!notification.destination) return;
     close();
@@ -174,7 +191,9 @@ function FeedPopover({
         <span className="font-semibold">Notifications</span>
         <button
           type="button"
-          onClick={() => void client?.markAllRead()}
+          onClick={() =>
+            void client?.markAllRead().catch(logFeedError("mark all read"))
+          }
           disabled={state.unreadCount === 0}
           className="ml-auto text-xs font-medium text-primary hover:underline disabled:opacity-40 disabled:hover:no-underline"
         >
@@ -201,7 +220,11 @@ function FeedPopover({
               key={notification.id}
               notification={notification}
               onOpen={() => openRow(notification)}
-              onMarkRead={() => void client?.markRead(notification.id)}
+              onMarkRead={() =>
+                void client
+                  ?.markRead(notification.id)
+                  .catch(logFeedError("mark read"))
+              }
             />
           ))
         )}

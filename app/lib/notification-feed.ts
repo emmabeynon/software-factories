@@ -53,6 +53,9 @@ export type NotificationFeedConfig = {
   feedChannelId: string;
 };
 
+/** Fetches a fresh signed token for the same user, before the current one expires. */
+export type RefreshFeedToken = () => Promise<string>;
+
 export interface NotificationFeedClient {
   /** Calls the listener now and on every change, including live arrivals. */
   subscribe(listener: (state: FeedState) => void): () => void;
