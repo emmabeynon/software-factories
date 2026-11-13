@@ -200,7 +200,7 @@ function FeedPopover({
           Mark all as read
         </button>
         <Link
-          to="/settings"
+          to="/settings#notifications"
           onClick={close}
           title="Notification preferences"
           aria-label="Notification preferences"
