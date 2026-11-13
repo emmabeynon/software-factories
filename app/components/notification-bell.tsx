@@ -40,6 +40,15 @@ const categoryIcon: Record<FeedCategory, React.ReactNode> = {
   enrollment: <GraduationCap />,
 };
 
+/** Asks the server for a new token; refuses one issued for a different user. */
+async function refreshFeedToken(userId: string): Promise<string> {
+  const response = await fetch("/api/notification-token");
+  if (!response.ok) throw new Error(`token refresh ${response.status}`);
+  const body: { userId: string; userToken: string } = await response.json();
+  if (body.userId !== userId) throw new Error("session user changed");
+  return body.userToken;
+}
+
 /** One live connection per signed-in user, rebuilt when the user (or token) changes. */
 function useNotificationFeed(config: NotificationFeedConfig | null) {
   const [state, setState] = useState<FeedState>(EMPTY_FEED_STATE);
@@ -57,7 +66,9 @@ function useNotificationFeed(config: NotificationFeedConfig | null) {
     let unsubscribe: (() => void) | undefined;
 
     import("~/lib/knock-feed-client")
-      .then(({ createKnockFeedClient }) => createKnockFeedClient(config))
+      .then(({ createKnockFeedClient }) => 
+        createKnockFeedClient(config, () => refreshFeedToken(config.userId))
+      )
       .then((next) => {
         if (cancelled) {
           next.close();
