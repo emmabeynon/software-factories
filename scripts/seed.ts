@@ -7,8 +7,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import * as schema from "../app/db/schema";
 import {
-  defaultNotifications,
-  syncNotificationUser,
+  introduceToNotifications,
 } from "../app/lib/notifications.server";
 import {
   UserRole,
@@ -274,9 +273,8 @@ async function seed() {
   );
 
   // Introduce everyone to Notifications (a no-op without KNOCK_SECRET_API_KEY).
-  const notifications = await defaultNotifications();
   for (const user of [admin, instructor1, instructor2, instructor3, ...allStudents]) {
-    await syncNotificationUser(notifications, user);
+    await introduceToNotifications(user);
   }
 
   // ─── Categories ───

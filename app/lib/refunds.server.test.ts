@@ -721,6 +721,24 @@ describe("telling people about a new Refund Request in the Notification Feed", (
     );
   });
 
+  it("does not alert a buyer who is themselves an admin, but still alerts the others", async () => {
+    const adminBuyer = db
+      .insert(schema.users)
+      .values({ name: "Bea Admin", email: "bea@example.com", role: UserRole.Admin })
+      .returning()
+      .get();
+    const purchase = buyForSelf(adminBuyer.id);
+    const notifications = inMemoryNotifications();
+
+    const result = raiseWith(notifications, purchase.id, adminBuyer.id);
+    await result.notified;
+
+    const [alert] = notifications.triggers.filter(
+      (t) => t.kind === "refund-requested"
+    );
+    expect(alert.recipients.map((r) => r.id)).toEqual([platformAdmin.id]);
+  });
+
   it("includes a newly promoted admin for later requests only", async () => {
     const first = buyForSelf(base.user.id);
     const notifications = inMemoryNotifications();
@@ -733,8 +751,9 @@ describe("telling people about a new Refund Request in the Notification Feed", (
       .where(eq(schema.users.id, promoted.id))
       .run();
 
-    const second = buyForSelf(promoted.id);
-    const secondResult = raiseWith(notifications, second.id, promoted.id);
+    const otherBuyer = addLearner("Quinn");
+    const second = buyForSelf(otherBuyer.id);
+    const secondResult = raiseWith(notifications, second.id, otherBuyer.id);
     await secondResult.notified;
 
     const [early, later] = notifications.triggers.filter(

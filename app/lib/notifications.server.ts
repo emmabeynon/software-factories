@@ -162,3 +162,25 @@ export async function syncNotificationUser(
     }
   });
 }
+
+/** The vendor-facing shape of a person. Role and other fields are never synced. */
+export function notifiable(user: NotifiableUser): NotifiableUser {
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    avatarUrl: user.avatarUrl,
+  };
+}
+
+/** One per domain event: `<kind>:<id>`, so a retry layer cannot send duplicates. */
+export function idempotencyKey(kind: NotificationKind, id: number): string {
+  return `${kind}:${id}`;
+}
+
+/** Introduces a person to the vendor via the app's default port. Never throws. */
+export async function introduceToNotifications(
+  user: NotifiableUser
+): Promise<void> {
+  await syncNotificationUser(await defaultNotifications(), user);
+}

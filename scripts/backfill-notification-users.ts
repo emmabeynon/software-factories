@@ -8,7 +8,7 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import * as schema from "../app/db/schema";
 import {
   defaultNotifications,
-  syncNotificationUser,
+  introduceToNotifications,
 } from "../app/lib/notifications.server";
 
 const db = drizzle(new Database("data.db"), { schema });
@@ -17,6 +17,6 @@ const everyone = db.select().from(schema.users).all();
 
 console.log(`Syncing ${everyone.length} users via the ${port.adapter} adapter...`);
 for (const user of everyone) {
-  await syncNotificationUser(port, user);
+  await introduceToNotifications(user);
 }
 console.log("Done.");

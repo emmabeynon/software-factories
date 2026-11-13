@@ -136,7 +136,7 @@ export function presentNotification(
     case "refund-requested":
       return {
         category: "refund",
-        title: `${text(data.buyerName) || "A buyer"} requested a refund`,
+        title: `${text(data.buyerName) || "A buyer"} raised a Refund Request`,
         snippet: [
           courseTitle,
           amountText,
