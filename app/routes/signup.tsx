@@ -9,6 +9,10 @@ import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { Card, CardContent, CardHeader } from "~/components/ui/card";
 import { db } from "~/db";
+import {
+  defaultNotifications,
+  syncNotificationUser,
+} from "~/lib/notifications.server";
 import { eq } from "drizzle-orm";
 
 const signupSchema = z.object({
@@ -79,6 +83,7 @@ export async function action({ request, url }: Route.ActionArgs) {
     .values({ name, email, role: UserRole.Student, avatarUrl: null })
     .returning()
     .get();
+  await syncNotificationUser(await defaultNotifications(), newUser);
   const cookie = await setCurrentUserId(request, newUser.id);
   throw redirect(destination, {
     headers: { "Set-Cookie": cookie },

@@ -1,6 +1,6 @@
 # Use Knock for in-app Notifications, on its hosted free plan
 
-Cadence sends Notifications (refund decisions, Seats claimed, Instructor comments and replies) through Knock, a hosted service, and shows them as a bell with an unread count plus a full-page inbox. We chose Knock because its free plan (10,000 messages a month, no workflow cap) fits our volume, it offers both drop-in components and headless hooks for the bell-plus-inbox look, and its feed updates in real time with nothing for us to run. This sits beside ADR 0006's single SQLite file, but Notification content and read state live at Knock, not in `data.db`.
+Cadence sends Notifications (refund decisions, Seats claimed, Instructor comments and replies) through Knock, a hosted service, and shows them as a bell with an unread count that opens a popover Notification Feed. We chose Knock because its free plan (10,000 messages a month, no workflow cap) fits our volume, it offers both drop-in components and headless hooks for the bell-and-popover look, and its feed updates in real time with nothing for us to run. This sits beside ADR 0006's single SQLite file, but Notification content and read state live at Knock, not in `data.db`.
 
 ## Considered Options
 

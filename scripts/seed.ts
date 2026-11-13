@@ -7,6 +7,10 @@ import path from "path";
 import { fileURLToPath } from "url";
 import * as schema from "../app/db/schema";
 import {
+  defaultNotifications,
+  syncNotificationUser,
+} from "../app/lib/notifications.server";
+import {
   UserRole,
   CourseStatus,
   LessonProgressStatus,
@@ -268,6 +272,12 @@ async function seed() {
   console.log(
     `Created ${1 + instructorCount + studentCount} users (1 admin, ${instructorCount} instructors, ${studentCount} students).`
   );
+
+  // Introduce everyone to Notifications (a no-op without KNOCK_SECRET_API_KEY).
+  const notifications = await defaultNotifications();
+  for (const user of [admin, instructor1, instructor2, instructor3, ...allStudents]) {
+    await syncNotificationUser(notifications, user);
+  }
 
   // ─── Categories ───
 

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { createTestDb, seedBaseData } from "~/test/setup";
 import * as schema from "~/db/schema";
@@ -14,6 +14,7 @@ import {
   listTeamLicences,
   raiseRefundRequest,
 } from "./refunds.server";
+import { inMemoryNotifications } from "./notifications.fake";
 
 type TestDb = ReturnType<typeof createTestDb>;
 
@@ -500,5 +501,135 @@ describe("listing Refund Requests", () => {
       { seatCount: 2, claimedSeatCount: 1, canRequestRefund: false },
       { seatCount: 2, claimedSeatCount: 0, canRequestRefund: true },
     ]);
+  });
+});
+
+describe("telling the buyer about a decision in the Notification Feed", () => {
+  it("notifies the buyer when a Refund Request is approved", async () => {
+    const purchase = buyForSelf(base.user.id);
+    const id = raise(purchase.id, base.user.id);
+    const notifications = inMemoryNotifications();
+
+    const result = approveRefundRequest(
+      db,
+      id,
+      platformAdmin.id,
+      "Sorry it was not for you.",
+      NOW,
+      notifications
+    );
+    if (!result.ok) throw new Error(result.error);
+    await result.notified;
+
+    expect(notifications.triggers).toEqual([
+      {
+        kind: "refund-approved",
+        category: "refund_request_updates",
+        recipients: [
+          {
+            id: base.user.id,
+            name: "Test User",
+            email: "test@example.com",
+            avatarUrl: null,
+          },
+        ],
+        actorId: platformAdmin.id,
+        idempotencyKey: `refund-approved:${id}`,
+        data: {
+          refundRequestId: id,
+          purchaseId: purchase.id,
+          courseTitle: "Test Course",
+          courseSlug: "test-course",
+          amountPaid: 7900,
+          decisionNote: "Sorry it was not for you.",
+        },
+      },
+    ]);
+  });
+
+  it("notifies the buyer when a Refund Request is declined, and says they can ask again", async () => {
+    const purchase = buyForSelf(base.user.id);
+    const id = raise(purchase.id, base.user.id);
+    const notifications = inMemoryNotifications();
+
+    const result = declineRefundRequest(
+      db,
+      id,
+      platformAdmin.id,
+      "You finished the course.",
+      NOW,
+      notifications
+    );
+    if (!result.ok) throw new Error(result.error);
+    await result.notified;
+
+    expect(notifications.triggers).toHaveLength(1);
+    expect(notifications.triggers[0]).toMatchObject({
+      kind: "refund-declined",
+      category: "refund_request_updates",
+      recipients: [{ id: base.user.id }],
+      idempotencyKey: `refund-declined:${id}`,
+      data: {
+        purchaseId: purchase.id,
+        courseTitle: "Test Course",
+        decisionNote: "You finished the course.",
+        canAskAgain: true,
+      },
+    });
+  });
+
+  it("notifies nobody when the decision fails", async () => {
+    const purchase = buyForSelf(base.user.id);
+    const id = raise(purchase.id, base.user.id);
+    declineRefundRequest(db, id, platformAdmin.id, "No.", NOW);
+    const notifications = inMemoryNotifications();
+
+    const result = approveRefundRequest(
+      db,
+      id,
+      platformAdmin.id,
+      null,
+      NOW,
+      notifications
+    );
+
+    expect(result.ok).toBe(false);
+    expect(notifications.triggers).toEqual([]);
+  });
+
+  it("still approves and declines when the port throws", async () => {
+    const first = buyForSelf(base.user.id);
+    const approveId = raise(first.id, base.user.id);
+    const other = addLearner("Priya");
+    const second = buyForSelf(other.id);
+    const declineId = raise(second.id, other.id);
+    const notifications = inMemoryNotifications();
+    notifications.failWith(new Error("Knock is down"));
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const approved = approveRefundRequest(
+      db,
+      approveId,
+      platformAdmin.id,
+      null,
+      NOW,
+      notifications
+    );
+    const declined = declineRefundRequest(
+      db,
+      declineId,
+      platformAdmin.id,
+      "No.",
+      NOW,
+      notifications
+    );
+    if (!approved.ok || !declined.ok) throw new Error("expected success");
+    await expect(approved.notified).resolves.toBeUndefined();
+    await expect(declined.notified).resolves.toBeUndefined();
+
+    expect(isEnrolled(base.user.id)).toBe(false);
+    expect(isEnrolled(other.id)).toBe(true);
+    expect(logged).toHaveBeenCalled();
+    logged.mockRestore();
   });
 });
