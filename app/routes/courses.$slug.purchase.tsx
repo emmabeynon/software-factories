@@ -334,7 +334,8 @@ export async function action({ params, request }: Route.ActionArgs) {
       throw redirect(`/courses/${slug}`);
     }
     createPurchase(currentUserId, course.id, pppPrice, country);
-    enrollUser(db, new Date(), currentUserId, course.id);
+    const { notified } = enrollUser(db, new Date(), currentUserId, course.id);
+    await notified;
     throw redirect(`/courses/${slug}/welcome`);
   }
 
