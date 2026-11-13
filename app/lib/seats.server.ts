@@ -1,5 +1,11 @@
 import { and, eq } from "drizzle-orm";
-import { coupons, enrollments, purchases } from "~/db/schema";
+import { coupons, courses, enrollments, purchases, users } from "~/db/schema";
+import { announceEnrollment } from "~/lib/enrollments.server";
+import {
+  bestEffort,
+  defaultNotifications,
+  type NotificationPort,
+} from "~/lib/notifications.server";
 import { getSeatAvailability, type Db } from "~/lib/refunds.server";
 
 // ─── Seat claims ───
@@ -13,7 +19,12 @@ export const SEAT_REFUNDED =
   "This seat is no longer available. Ask the person who shared it with you.";
 
 export type ClaimSeatResult =
-  | { ok: true; enrollment: typeof enrollments.$inferSelect }
+  | {
+      ok: true;
+      enrollment: typeof enrollments.$inferSelect;
+      /** Settles once the Notifications are sent or have failed. Never rejects. */
+      notified: Promise<void>;
+    }
   | { ok: false; error: string };
 
 export function claimSeat(
@@ -21,13 +32,10 @@ export function claimSeat(
   now: Date,
   code: string,
   userId: number,
-  userCountry: string
+  userCountry: string,
+  notifications?: NotificationPort
 ): ClaimSeatResult {
-  const coupon = db
-    .select()
-    .from(coupons)
-    .where(eq(coupons.code, code))
-    .get();
+  const coupon = db.select().from(coupons).where(eq(coupons.code, code)).get();
   if (!coupon) {
     return { ok: false, error: "Coupon not found" };
   }
@@ -78,9 +86,90 @@ export function claimSeat(
 
   const enrollment = db
     .insert(enrollments)
-    .values({ userId, courseId: coupon.courseId, enrolledAt: now.toISOString() })
+    .values({
+      userId,
+      courseId: coupon.courseId,
+      enrolledAt: now.toISOString(),
+    })
     .returning()
     .get();
 
-  return { ok: true, enrollment };
+  const notified = Promise.all([
+    announceSeatClaim(db, coupon, userId, notifications),
+    announceEnrollment(db, enrollment, notifications),
+  ]).then(() => undefined);
+
+  return { ok: true, enrollment, notified };
+}
+
+/**
+ * Tells the Team Admin who owns the Team Licence, in the Notification Feed,
+ * who claimed a Seat and how many are left. One per claim. A Team Admin
+ * claiming their own Seat is not told. Runs after the claim has committed.
+ * Never rejects.
+ */
+function announceSeatClaim(
+  db: Db,
+  coupon: typeof coupons.$inferSelect,
+  claimerId: number,
+  notifications: NotificationPort | undefined
+): Promise<void> {
+  return bestEffort("Seat claim Notification", async () => {
+    const purchase = db
+      .select()
+      .from(purchases)
+      .where(eq(purchases.id, coupon.purchaseId))
+      .get();
+    if (!purchase || purchase.userId === claimerId) return;
+
+    const teamAdmin = db
+      .select()
+      .from(users)
+      .where(eq(users.id, purchase.userId))
+      .get();
+    const claimer = db
+      .select()
+      .from(users)
+      .where(eq(users.id, claimerId))
+      .get();
+    const course = db
+      .select()
+      .from(courses)
+      .where(eq(courses.id, coupon.courseId))
+      .get();
+    if (!teamAdmin || !claimer || !course) return;
+
+    const seatsLeft = db
+      .select()
+      .from(coupons)
+      .where(eq(coupons.purchaseId, purchase.id))
+      .all()
+      .filter(
+        (seat) => seat.redeemedByUserId === null && seat.refundedAt === null
+      ).length;
+
+    const port = notifications ?? (await defaultNotifications());
+    await port.trigger({
+      kind: "seat-claimed",
+      category: "seat_claims",
+      recipients: [
+        {
+          id: teamAdmin.id,
+          name: teamAdmin.name,
+          email: teamAdmin.email,
+          avatarUrl: teamAdmin.avatarUrl,
+        },
+      ],
+      actorId: claimer.id,
+      idempotencyKey: "seat-claimed:" + coupon.id,
+      data: {
+        couponId: coupon.id,
+        purchaseId: purchase.id,
+        claimerName: claimer.name,
+        courseTitle: course.title,
+        courseSlug: course.slug,
+        seatsLeft,
+      },
+    });
+  });
 }

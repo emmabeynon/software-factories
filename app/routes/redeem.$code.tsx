@@ -138,6 +138,8 @@ export async function action({ params, request }: Route.ActionArgs) {
     return data({ error: result.error }, { status: 400 });
   }
 
+  await result.notified;
+
   const course = getCourseById(result.enrollment.courseId);
   if (!course) {
     throw redirect("/courses");
