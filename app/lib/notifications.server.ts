@@ -40,6 +40,8 @@ export type NotificationData = Record<string, string | number | boolean | null>;
 export type NotificationKind =
   | "refund-approved"
   | "refund-declined"
+  | "refund-confirmed"
+  | "refund-requested"
   | "seat-claimed"
   | "enrollment-created";
 

@@ -70,6 +70,29 @@ describe("presentNotification", () => {
     expect(row.category).toBe("refund");
   });
 
+  it("names the course and amount in a Refund Request confirmation", () => {
+    const row = presentNotification("refund-confirmed", {
+      courseTitle: "TypeScript Pro",
+      amountPaid: 7900,
+    });
+    expect(row.snippet).toBe("TypeScript Pro, $79.00, is under review.");
+  });
+
+  it("links an Open Refund Request alert to admin.refunds", () => {
+    const row = presentNotification("refund-requested", {
+      buyerName: "Sam",
+      courseTitle: "TypeScript Pro",
+      amountPaid: 7900,
+      reason: "Not for me",
+    });
+    expect(row).toEqual({
+      category: "refund",
+      title: "Sam requested a refund",
+      snippet: "TypeScript Pro · $79.00 · Not for me",
+      destination: "/admin/refunds",
+    });
+  });
+
   it("still renders something for a kind it does not know", () => {
     const row = presentNotification("something-new", {});
     expect(row.title).toBe("New notification");

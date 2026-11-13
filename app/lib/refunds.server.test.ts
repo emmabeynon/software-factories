@@ -633,3 +633,147 @@ describe("telling the buyer about a decision in the Notification Feed", () => {
     logged.mockRestore();
   });
 });
+
+describe("telling people about a new Refund Request in the Notification Feed", () => {
+  function raiseWith(
+    notifications: ReturnType<typeof inMemoryNotifications>,
+    purchaseId: number,
+    buyerId: number
+  ) {
+    const result = raiseRefundRequest(
+      db,
+      purchaseId,
+      buyerId,
+      "It was not what I expected.",
+      NOW,
+      notifications
+    );
+    if (!result.ok) throw new Error(result.error);
+    return result;
+  }
+
+  it("confirms to the buyer that the request is under review, even though they caused it", async () => {
+    const purchase = buyForSelf(base.user.id);
+    const notifications = inMemoryNotifications();
+
+    const result = raiseWith(notifications, purchase.id, base.user.id);
+    await result.notified;
+
+    expect(
+      notifications.triggers.filter((t) => t.kind === "refund-confirmed")
+    ).toEqual([
+      {
+        kind: "refund-confirmed",
+        category: "refund_request_updates",
+        recipients: [
+          {
+            id: base.user.id,
+            name: "Test User",
+            email: "test@example.com",
+            avatarUrl: null,
+          },
+        ],
+        actorId: null,
+        idempotencyKey: `refund-confirmed:${result.refundRequestId}`,
+        data: {
+          refundRequestId: result.refundRequestId,
+          purchaseId: purchase.id,
+          courseTitle: "Test Course",
+          courseSlug: "test-course",
+          amountPaid: 7900,
+        },
+      },
+    ]);
+  });
+
+  it("alerts every current Platform Admin, with who asked, the course, amount and reason", async () => {
+    const purchase = buyForSelf(base.user.id);
+    const otherAdmin = db
+      .insert(schema.users)
+      .values({ name: "Ada Admin", email: "ada@example.com", role: UserRole.Admin })
+      .returning()
+      .get();
+    const notifications = inMemoryNotifications();
+
+    const result = raiseWith(notifications, purchase.id, base.user.id);
+    await result.notified;
+
+    const alerts = notifications.triggers.filter(
+      (t) => t.kind === "refund-requested"
+    );
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]).toMatchObject({
+      category: "open_refund_requests",
+      actorId: base.user.id,
+      idempotencyKey: `refund-requested:${result.refundRequestId}`,
+      data: {
+        refundRequestId: result.refundRequestId,
+        purchaseId: purchase.id,
+        buyerName: "Test User",
+        courseTitle: "Test Course",
+        courseSlug: "test-course",
+        amountPaid: 7900,
+        reason: "It was not what I expected.",
+      },
+    });
+    expect(alerts[0].recipients.map((r) => r.id).sort()).toEqual(
+      [platformAdmin.id, otherAdmin.id].sort()
+    );
+  });
+
+  it("includes a newly promoted admin for later requests only", async () => {
+    const first = buyForSelf(base.user.id);
+    const notifications = inMemoryNotifications();
+    const firstResult = raiseWith(notifications, first.id, base.user.id);
+    await firstResult.notified;
+
+    const promoted = addLearner("Pia");
+    db.update(schema.users)
+      .set({ role: UserRole.Admin })
+      .where(eq(schema.users.id, promoted.id))
+      .run();
+
+    const second = buyForSelf(promoted.id);
+    const secondResult = raiseWith(notifications, second.id, promoted.id);
+    await secondResult.notified;
+
+    const [early, later] = notifications.triggers.filter(
+      (t) => t.kind === "refund-requested"
+    );
+    expect(early.recipients.map((r) => r.id)).not.toContain(promoted.id);
+    expect(later.recipients.map((r) => r.id)).toContain(promoted.id);
+  });
+
+  it("does not remove other admins' Notifications when one admin decides", async () => {
+    const purchase = buyForSelf(base.user.id);
+    const notifications = inMemoryNotifications();
+    const raised = raiseWith(notifications, purchase.id, base.user.id);
+    await raised.notified;
+
+    const decided = approveRefundRequest(
+      db,
+      raised.refundRequestId,
+      platformAdmin.id,
+      null,
+      NOW,
+      notifications
+    );
+    if (!decided.ok) throw new Error(decided.error);
+    await decided.notified;
+
+    expect(notifications.archives).toEqual([]);
+  });
+
+  it("never fails raising the request when delivery fails", async () => {
+    const purchase = buyForSelf(base.user.id);
+    const notifications = inMemoryNotifications();
+    notifications.failWith(new Error("Knock is down"));
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const result = raiseWith(notifications, purchase.id, base.user.id);
+
+    await expect(result.notified).resolves.toBeUndefined();
+    expect(logged).toHaveBeenCalled();
+    logged.mockRestore();
+  });
+});
