@@ -14,6 +14,10 @@ import { UserRole, RefundStatus, users } from "~/db/schema";
 import { AlertTriangle } from "lucide-react";
 import { data, isRouteErrorResponse, Link } from "react-router";
 import { db } from "~/db";
+import {
+  defaultNotifications,
+  syncNotificationUser,
+} from "~/lib/notifications.server";
 import { eq } from "drizzle-orm";
 import { formatPrice } from "~/lib/utils";
 import { listRefundRequestsForBuyer } from "~/lib/refunds.server";
@@ -88,12 +92,13 @@ export async function action({ request }: Route.ActionArgs) {
 
   const { name, bio } = parsed.data;
 
-  db
+  const updated = db
     .update(users)
     .set({ name, email: currentUser.email, bio: bio || null })
     .where(eq(users.id, currentUser.id))
     .returning()
     .get();
+  await syncNotificationUser(await defaultNotifications(), updated);
   return { success: true };
 }
 

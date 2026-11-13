@@ -127,6 +127,8 @@ export async function action({ request }: Route.ActionArgs) {
     return data({ error: result.error }, { status: result.status });
   }
 
+  // The Notification never fails the decision; it settles even when Knock is down.
+  await result.notified;
   await sendEmail(result.email);
 
   return {

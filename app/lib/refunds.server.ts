@@ -18,6 +18,11 @@ import {
 } from "~/db/schema";
 import { formatPrice } from "~/lib/utils";
 import {
+  bestEffort,
+  defaultNotifications,
+  type NotificationPort,
+} from "~/lib/notifications.server";
+import {
   REFUND_COMPLETION_LIMIT,
   REFUND_WATCH_LIMIT_SECONDS,
   REFUND_WINDOW_DAYS,
@@ -568,7 +573,79 @@ export function listTeamLicences(db: Queryable, buyerId: number, now: Date) {
 
 // ─── Deciding a Refund Request ───
 
-export type DecisionResult = { ok: true; email: Email } | Failure;
+/**
+ * `notified` settles once the buyer's Notification has been sent or has failed.
+ * It never rejects: a failing Notification never fails the decision.
+ */
+export type DecisionResult =
+  | { ok: true; email: Email; notified: Promise<void> }
+  | Failure;
+
+type Decided = { ok: true; email: Email; purchase: Purchase } | Failure;
+
+type Decision = RefundStatus.Approved | RefundStatus.Declined;
+
+/**
+ * Tells the buyer, in the Notification Feed, how their Refund Request was
+ * decided. Runs after the decision has committed. The Postmark email carries
+ * on alongside it, unchanged.
+ */
+function announceDecision(
+  db: Queryable,
+  decided: Decided,
+  refundRequestId: number,
+  decision: Decision,
+  note: string | null,
+  platformAdminId: number,
+  notifications: NotificationPort | undefined
+): DecisionResult {
+  if (!decided.ok) return decided;
+
+  const { purchase } = decided;
+  const notified = bestEffort(`${decision} Notification`, async () => {
+    const buyer = db
+      .select()
+      .from(users)
+      .where(eq(users.id, purchase.userId))
+      .get();
+    const course = db
+      .select()
+      .from(courses)
+      .where(eq(courses.id, purchase.courseId))
+      .get();
+    if (!buyer || !course) return;
+
+    const kind =
+      decision === RefundStatus.Approved ? "refund-approved" : "refund-declined";
+    const port = notifications ?? (await defaultNotifications());
+
+    await port.trigger({
+      kind,
+      category: "refund_request_updates",
+      recipients: [
+        {
+          id: buyer.id,
+          name: buyer.name,
+          email: buyer.email,
+          avatarUrl: buyer.avatarUrl,
+        },
+      ],
+      actorId: platformAdminId,
+      idempotencyKey: kind + ":" + refundRequestId,
+      data: {
+        refundRequestId,
+        purchaseId: purchase.id,
+        courseTitle: course.title,
+        courseSlug: course.slug,
+        amountPaid: purchase.amountPaid,
+        decisionNote: note,
+        ...(decision === RefundStatus.Declined ? { canAskAgain: true } : {}),
+      },
+    });
+  });
+
+  return { ok: true, email: decided.email, notified };
+}
 
 function findOpenRefundRequest(
   tx: Queryable,
@@ -616,9 +693,10 @@ export function approveRefundRequest(
   refundRequestId: number,
   platformAdminId: number,
   note: string | null,
-  now: Date
+  now: Date,
+  notifications?: NotificationPort
 ): DecisionResult {
-  return db.transaction((tx): DecisionResult => {
+  const decided = db.transaction((tx): Decided => {
     const found = findOpenRefundRequest(tx, refundRequestId);
     if (!found.ok) return found;
 
@@ -680,8 +758,19 @@ export function approveRefundRequest(
     return {
       ok: true,
       email: buildDecisionEmail(tx, purchase, RefundStatus.Approved, note),
+      purchase,
     };
   });
+
+  return announceDecision(
+    db,
+    decided,
+    refundRequestId,
+    RefundStatus.Approved,
+    note,
+    platformAdminId,
+    notifications
+  );
 }
 
 /**
@@ -694,7 +783,8 @@ export function declineRefundRequest(
   refundRequestId: number,
   platformAdminId: number,
   note: string,
-  now: Date
+  now: Date,
+  notifications?: NotificationPort
 ): DecisionResult {
   const trimmedNote = note.trim();
 
@@ -706,7 +796,7 @@ export function declineRefundRequest(
     };
   }
 
-  return db.transaction((tx): DecisionResult => {
+  const decided = db.transaction((tx): Decided => {
     const found = findOpenRefundRequest(tx, refundRequestId);
     if (!found.ok) return found;
 
@@ -728,8 +818,19 @@ export function declineRefundRequest(
         RefundStatus.Declined,
         trimmedNote
       ),
+      purchase: found.purchase,
     };
   });
+
+  return announceDecision(
+    db,
+    decided,
+    refundRequestId,
+    RefundStatus.Declined,
+    trimmedNote,
+    platformAdminId,
+    notifications
+  );
 }
 
 /** The email the buyer gets once their Refund Request is decided. */
