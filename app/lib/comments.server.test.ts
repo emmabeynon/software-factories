@@ -3,7 +3,7 @@ import { createTestDb, seedBaseData } from "~/test/setup";
 import * as schema from "~/db/schema";
 import { MAX_COMMENT_LENGTH } from "./comments";
 import { inMemoryNotifications } from "./notifications.fake";
-import { createComment } from "./comments.server";
+import { createComment, deleteComment } from "./comments.server";
 
 type TestDb = ReturnType<typeof createTestDb>;
 
@@ -357,6 +357,153 @@ describe("telling people about Discussion Questions and Replies in the Notificat
 
     await expect(notified).resolves.toBeUndefined();
     expect(comment.body).toBe("Hello");
+    expect(logged).toHaveBeenCalled();
+    logged.mockRestore();
+  });
+});
+
+describe("removing Notifications when a comment is deleted", () => {
+  const post = (userId: number, parentId: number | null, body: string) =>
+    createComment(
+      db,
+      NOW,
+      userId,
+      lessonId,
+      parentId,
+      body,
+      inMemoryNotifications()
+    ).comment;
+
+  function student() {
+    return db
+      .insert(schema.users)
+      .values({ name: "Other", email: "other@example.com", role: "student" })
+      .returning()
+      .get();
+  }
+
+  it("soft-deletes the comment and archives its Notification", async () => {
+    const question = post(base.user.id, null, "Q");
+    const notifications = inMemoryNotifications();
+
+    const { comment, notified } = deleteComment(
+      db,
+      NOW,
+      question.id,
+      base.user.id,
+      false,
+      notifications
+    );
+    await notified;
+
+    expect(comment.deletedAt).toBe(NOW.toISOString());
+    expect(notifications.archives).toEqual([question.id]);
+  });
+
+  it("archives only the deleted reply, not the question's Notification", async () => {
+    const question = post(base.user.id, null, "Q");
+    const replier = student();
+    const reply = post(replier.id, question.id, "A");
+    const notifications = inMemoryNotifications();
+
+    await deleteComment(db, NOW, reply.id, replier.id, false, notifications)
+      .notified;
+
+    expect(notifications.archives).toEqual([reply.id]);
+  });
+
+  it("leaves Reply Notifications alone when the question is deleted", async () => {
+    const question = post(base.user.id, null, "Q");
+    const reply = post(student().id, question.id, "A");
+    const notifications = inMemoryNotifications();
+
+    await deleteComment(
+      db,
+      NOW,
+      question.id,
+      base.user.id,
+      false,
+      notifications
+    ).notified;
+
+    expect(notifications.archives).not.toContain(reply.id);
+    expect(notifications.archives).toEqual([question.id]);
+  });
+
+  it("lets staff delete someone else's comment", async () => {
+    const question = post(base.user.id, null, "Q");
+    const notifications = inMemoryNotifications();
+
+    await deleteComment(
+      db,
+      NOW,
+      question.id,
+      base.instructor.id,
+      true,
+      notifications
+    ).notified;
+
+    expect(notifications.archives).toEqual([question.id]);
+  });
+
+  it("rejects deleting another person's comment and archives nothing", () => {
+    const question = post(base.user.id, null, "Q");
+    const notifications = inMemoryNotifications();
+
+    expect(() =>
+      deleteComment(db, NOW, question.id, student().id, false, notifications)
+    ).toThrow("You can only delete your own comments");
+    expect(notifications.archives).toEqual([]);
+  });
+
+  it("rejects an unknown comment", () => {
+    expect(() => deleteComment(db, NOW, 999, base.user.id, false)).toThrow(
+      "Comment not found"
+    );
+  });
+
+  it("does nothing more when the comment is already deleted", async () => {
+    const question = post(base.user.id, null, "Q");
+    await deleteComment(
+      db,
+      NOW,
+      question.id,
+      base.user.id,
+      false,
+      inMemoryNotifications()
+    ).notified;
+    const notifications = inMemoryNotifications();
+
+    const { notified } = deleteComment(
+      db,
+      new Date(NOW.getTime() + 1000),
+      question.id,
+      base.user.id,
+      false,
+      notifications
+    );
+    await notified;
+
+    expect(notifications.archives).toEqual([]);
+  });
+
+  it("still deletes the comment when the Notification port fails", async () => {
+    const question = post(base.user.id, null, "Q");
+    const notifications = inMemoryNotifications();
+    notifications.failWith(new Error("Knock is down"));
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const { comment, notified } = deleteComment(
+      db,
+      NOW,
+      question.id,
+      base.user.id,
+      false,
+      notifications
+    );
+
+    await expect(notified).resolves.toBeUndefined();
+    expect(comment.deletedAt).toBe(NOW.toISOString());
     expect(logged).toHaveBeenCalled();
     logged.mockRestore();
   });
