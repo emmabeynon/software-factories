@@ -3,6 +3,8 @@
 // components call only the NotificationFeedClient port; only the adapter
 // (knock-feed-client.ts) knows Knock. Nothing here touches the browser or Knock.
 
+import { formatPrice } from "~/lib/utils";
+
 export type FeedCategory = "discussion" | "refund" | "team" | "enrollment";
 
 /** Who caused a Notification. Null for Notifications from Cadence itself. */
@@ -99,6 +101,8 @@ export function presentNotification(
   const courseSlug = text(data.courseSlug);
   const courseUrl = courseSlug ? `/courses/${courseSlug}` : null;
   const note = text(data.decisionNote);
+  const amountText =
+    typeof data.amountPaid === "number" ? formatPrice(data.amountPaid) : "";
 
   switch (kind) {
     case "refund-approved":
@@ -122,9 +126,22 @@ export function presentNotification(
         category: "refund",
         title: "We've received your Refund Request",
         snippet: courseTitle
-          ? `${courseTitle} is under review.`
+          ? `${[courseTitle, amountText].filter(Boolean).join(", ")}, is under review.`
           : "It is under review.",
         destination: null,
+      };
+    case "refund-requested":
+      return {
+        category: "refund",
+        title: `${text(data.buyerName) || "A buyer"} requested a refund`,
+        snippet: [
+          courseTitle,
+          amountText,
+          text(data.reason),
+        ]
+          .filter(Boolean)
+          .join(" · "),
+        destination: "/admin/refunds",
       };
     default:
       return {

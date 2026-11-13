@@ -15,6 +15,7 @@ import {
   videoWatchEvents,
   LessonProgressStatus,
   RefundStatus,
+  UserRole,
 } from "~/db/schema";
 import { formatPrice } from "~/lib/utils";
 import {
@@ -356,15 +357,88 @@ export function getRefundOffer(
 export type Email = { to: string; subject: string; body: string };
 
 export type RaiseResult =
-  | { ok: true; refundRequestId: number; kind: PurchaseKind; email: Email }
+  | {
+      ok: true;
+      refundRequestId: number;
+      kind: PurchaseKind;
+      email: Email;
+      /** Settles once the Notifications have been sent or have failed. Never rejects. */
+      notified: Promise<void>;
+    }
   | Failure;
+
+function notifiable(user: typeof users.$inferSelect) {
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    avatarUrl: user.avatarUrl,
+  };
+}
+
+/**
+ * Confirms the request to the buyer and alerts every Platform Admin. Runs after
+ * the request has committed. Admins are found by querying role = admin now, so
+ * a newly promoted admin hears about later requests only. The Postmark email
+ * carries on alongside, unchanged.
+ */
+function announceRequest(
+  db: Queryable,
+  refundRequestId: number,
+  purchase: Purchase,
+  buyer: typeof users.$inferSelect,
+  course: typeof courses.$inferSelect,
+  reason: string,
+  notifications: NotificationPort | undefined
+): Promise<void> {
+  return bestEffort("Refund Request Notifications", async () => {
+    const port = notifications ?? (await defaultNotifications());
+    const data = {
+      refundRequestId,
+      purchaseId: purchase.id,
+      courseTitle: course.title,
+      courseSlug: course.slug,
+      amountPaid: purchase.amountPaid,
+    };
+
+    // Independent: one failing must not stop the other.
+    await bestEffort("Refund Request confirmation", () =>
+      port.trigger({
+        kind: "refund-confirmed",
+        category: "refund_request_updates",
+        recipients: [notifiable(buyer)],
+        actorId: null,
+        idempotencyKey: "refund-confirmed:" + refundRequestId,
+        data,
+      })
+    );
+
+    await bestEffort("Open Refund Request alert", async () => {
+      const admins = db
+        .select()
+        .from(users)
+        .where(eq(users.role, UserRole.Admin))
+        .all();
+      if (admins.length === 0) return;
+      await port.trigger({
+        kind: "refund-requested",
+        category: "open_refund_requests",
+        recipients: admins.map(notifiable),
+        actorId: buyer.id,
+        idempotencyKey: "refund-requested:" + refundRequestId,
+        data: { ...data, buyerName: buyer.name, reason },
+      });
+    });
+  });
+}
 
 export function raiseRefundRequest(
   db: Db,
   purchaseId: number,
   buyerId: number,
   reason: string,
-  now: Date
+  now: Date,
+  notifications?: NotificationPort
 ): RaiseResult {
   const check = checkRefundRequest(db, purchaseId, buyerId, now);
   if (!check.ok) return check;
@@ -396,6 +470,15 @@ export function raiseRefundRequest(
     ok: true,
     refundRequestId: refundRequest.id,
     kind: kindOf(getSeats(db, purchase.id)),
+    notified: announceRequest(
+      db,
+      refundRequest.id,
+      purchase,
+      buyer,
+      course,
+      reason,
+      notifications
+    ),
     email: {
       to: buyer.email,
       subject: `Refund requested — ${course.title}`,

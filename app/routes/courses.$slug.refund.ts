@@ -73,6 +73,7 @@ export async function action({ params, request }: Route.ActionArgs) {
   }
 
   await sendEmail(result.email);
+  await result.notified;
 
   return redirect(result.kind === "team_licence" ? "/team" : "/settings");
 }
