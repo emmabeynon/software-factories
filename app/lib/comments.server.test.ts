@@ -377,7 +377,11 @@ describe("removing Notifications when a comment is deleted", () => {
   function student() {
     return db
       .insert(schema.users)
-      .values({ name: "Other", email: "other@example.com", role: "student" })
+      .values({
+        name: "Other",
+        email: "other@example.com",
+        role: schema.UserRole.Student,
+      })
       .returning()
       .get();
   }

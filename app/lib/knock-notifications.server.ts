@@ -101,7 +101,7 @@ export function knockNotifications(secretKey: string): NotificationPort {
       });
     },
 
-    // Not yet exercised against Knock; used by comment deletion (a later ticket).
+    // Not yet exercised against Knock: the trigger_data filter is unverified without credentials.
     async archiveForComment(commentId) {
       const messageIds: string[] = [];
       for await (const message of knock.messages.list({
