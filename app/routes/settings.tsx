@@ -21,6 +21,18 @@ import {
 import { eq } from "drizzle-orm";
 import { formatPrice } from "~/lib/utils";
 import { listRefundRequestsForBuyer } from "~/lib/refunds.server";
+import type { NotificationCategory } from "~/lib/notifications.server";
+import {
+  NOTIFICATION_CATEGORIES,
+  getNotificationPreferenceSwitches,
+  setNotificationPreference,
+  type PreferenceSwitch,
+} from "~/lib/notification-preferences.server";
+
+const preferenceSchema = z.object({
+  category: z.enum(NOTIFICATION_CATEGORIES as [string, ...string[]]),
+  enabled: z.enum(["true", "false"]),
+});
 
 const settingsSchema = z.object({
   name: z.string().trim().min(1, "Name cannot be empty."),
@@ -64,6 +76,11 @@ export async function loader({ request }: Route.LoaderArgs) {
       role: currentUser.role,
     },
     refundRequests,
+    notificationSwitches: await getNotificationPreferenceSwitches(
+      db,
+      await defaultNotifications(),
+      currentUserId
+    ),
   };
 }
 
@@ -84,6 +101,28 @@ export async function action({ request }: Route.ActionArgs) {
   }
 
   const formData = await request.formData();
+
+  if (formData.get("intent") === "notification-preference") {
+    const parsedPreference = parseFormData(formData, preferenceSchema);
+    if (!parsedPreference.success) {
+      throw data("Invalid notification preference.", { status: 400 });
+    }
+    try {
+      await setNotificationPreference(
+        await defaultNotifications(),
+        currentUser.id,
+        parsedPreference.data.category as NotificationCategory,
+        parsedPreference.data.enabled === "true"
+      );
+    } catch (error) {
+      console.error("[notifications] saving preference failed", error);
+      // Returned, not thrown: a thrown response would replace the whole page
+      // with the error boundary. The card toasts and the switch reverts.
+      return data({ preferenceError: true }, { status: 502 });
+    }
+    return { preferenceSaved: true };
+  }
+
   const parsed = parseFormData(formData, settingsSchema);
 
   if (!parsed.success) {
@@ -103,7 +142,7 @@ export async function action({ request }: Route.ActionArgs) {
 }
 
 export default function Settings({ loaderData }: Route.ComponentProps) {
-  const { user, refundRequests } = loaderData;
+  const { user, refundRequests, notificationSwitches } = loaderData;
   const openCount = refundRequests.filter(
     (refundRequest) => refundRequest.status === RefundStatus.Open
   ).length;
@@ -193,6 +232,23 @@ export default function Settings({ loaderData }: Route.ComponentProps) {
         </CardContent>
       </Card>
 
+      <Card id="notifications" className="mt-8 max-w-md scroll-mt-6">
+        <CardHeader>
+          <h2 className="text-lg font-semibold">Notifications</h2>
+          <p className="text-sm text-muted-foreground">
+            Choose what shows up in your Notification Feed.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {notificationSwitches.map((preference) => (
+            <PreferenceSwitchRow
+              key={preference.category}
+              preference={preference}
+            />
+          ))}
+        </CardContent>
+      </Card>
+
       {refundRequests.length > 0 && (
         <Card className="mt-8 max-w-md">
           <CardHeader>
@@ -241,6 +297,54 @@ export default function Settings({ loaderData }: Route.ComponentProps) {
         </Card>
       )}
     </div>
+  );
+}
+
+function PreferenceSwitchRow({ preference }: { preference: PreferenceSwitch }) {
+  const fetcher = useFetcher<typeof action>();
+  // Optimistic: show the value being saved until the save settles. If it
+  // fails, the submission clears and the switch shows the saved value again.
+  const submitted = fetcher.formData?.get("enabled");
+  const enabled = submitted ? submitted === "true" : preference.enabled;
+  const labelId = `notification-${preference.category}`;
+
+  useEffect(() => {
+    if (
+      fetcher.state === "idle" &&
+      fetcher.data &&
+      "preferenceError" in fetcher.data
+    ) {
+      toast.error(`Couldn't save your ${preference.label} setting.`);
+    }
+  }, [fetcher.state, fetcher.data, preference.label]);
+
+  return (
+    <fetcher.Form
+      method="post"
+      className="flex items-center justify-between gap-3"
+    >
+      <input type="hidden" name="intent" value="notification-preference" />
+      <input type="hidden" name="category" value={preference.category} />
+      <input type="hidden" name="enabled" value={String(!enabled)} />
+      <span id={labelId} className="text-sm font-medium">
+        {preference.label}
+      </span>
+      <button
+        type="submit"
+        role="switch"
+        aria-checked={enabled}
+        aria-labelledby={labelId}
+        className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${
+          enabled ? "bg-primary" : "bg-muted-foreground/30"
+        }`}
+      >
+        <span
+          className={`absolute left-0.5 top-0.5 size-5 rounded-full bg-background shadow transition-transform ${
+            enabled ? "translate-x-5" : ""
+          }`}
+        />
+      </button>
+    </fetcher.Form>
   );
 }
 
