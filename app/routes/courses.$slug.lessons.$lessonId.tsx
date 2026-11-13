@@ -868,7 +868,7 @@ export async function action({ params, request }: Route.ActionArgs) {
         if (!parsed.success) {
           return { ok: false, error: "Enter a comment before posting." };
         }
-        createComment(
+        const { notified } = createComment(
           db,
           new Date(),
           currentUserId,
@@ -876,6 +876,7 @@ export async function action({ params, request }: Route.ActionArgs) {
           parsed.data.parentId ?? null,
           parsed.data.body
         );
+        await notified;
         return { ok: true };
       }
 

@@ -41,7 +41,9 @@ export type NotificationKind =
   | "refund-approved"
   | "refund-declined"
   | "seat-claimed"
-  | "enrollment-created";
+  | "enrollment-created"
+  | "discussion-question"
+  | "discussion-reply";
 
 export type NotificationTrigger = {
   kind: NotificationKind;
