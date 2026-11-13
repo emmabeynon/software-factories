@@ -168,7 +168,7 @@ export async function action({ request }: Route.ActionArgs) {
   const access = await requireStaff(request, course.courseId);
 
   try {
-    createComment(
+    const { notified } = createComment(
       db,
       new Date(),
       access.userId!,
@@ -176,6 +176,7 @@ export async function action({ request }: Route.ActionArgs) {
       question.id,
       parsed.data.body
     );
+    await notified;
   } catch (error) {
     if (error instanceof Error) {
       return { ok: false, error: error.message };

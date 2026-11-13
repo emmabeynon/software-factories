@@ -93,6 +93,28 @@ describe("presentNotification", () => {
     });
   });
 
+  it("links Discussion Questions and Replies to the comment anchor on the lesson", () => {
+    const data = {
+      commentId: 12,
+      lessonId: 4,
+      lessonTitle: "Generics",
+      authorName: "Priya",
+      snippet: "How do I constrain T?",
+      courseSlug: "typescript-pro",
+    };
+    expect(presentNotification("discussion-question", data)).toEqual({
+      category: "discussion",
+      title: "Priya asked a question in Generics",
+      snippet: "How do I constrain T?",
+      destination: "/courses/typescript-pro/lessons/4#comment-12",
+    });
+    const reply = presentNotification("discussion-reply", data);
+    expect(reply.title).toBe("Priya replied to your question in Generics");
+    expect(reply.destination).toBe(
+      "/courses/typescript-pro/lessons/4#comment-12"
+    );
+  });
+
   it("still renders something for a kind it does not know", () => {
     const row = presentNotification("something-new", {});
     expect(row.title).toBe("New notification");

@@ -1,5 +1,10 @@
 import { eq } from "drizzle-orm";
-import { comments, courses, lessons, modules } from "~/db/schema";
+import { comments, courses, lessons, modules, users } from "~/db/schema";
+import {
+  bestEffort,
+  defaultNotifications,
+  type NotificationPort,
+} from "~/lib/notifications.server";
 import type { Db } from "~/lib/refunds.server";
 import { MIN_COMMENT_LENGTH, MAX_COMMENT_LENGTH } from "~/lib/comments";
 
@@ -21,14 +26,105 @@ export function assertValidCommentBody(body: string): string {
   return trimmed;
 }
 
+const SNIPPET_LENGTH = 140;
+
+function snippetOf(body: string): string {
+  const flat = body.replace(/\s+/g, " ").trim();
+  return flat.length > SNIPPET_LENGTH
+    ? flat.slice(0, SNIPPET_LENGTH - 1).trimEnd() + "…"
+    : flat;
+}
+
+type Comment = typeof comments.$inferSelect;
+
+/**
+ * Tells one person, in the Notification Feed, about a comment: the course's
+ * Instructor for a Discussion Question (unless they wrote it), or the
+ * question's author for a Discussion Reply (unless they wrote it). Runs after
+ * the comment has committed. Never rejects.
+ */
+function announceComment(
+  db: Db,
+  comment: Comment,
+  notifications: NotificationPort | undefined
+): Promise<void> {
+  return bestEffort("Discussion Notification", async () => {
+    const context = db
+      .select({ course: courses, lessonTitle: lessons.title })
+      .from(lessons)
+      .innerJoin(modules, eq(lessons.moduleId, modules.id))
+      .innerJoin(courses, eq(modules.courseId, courses.id))
+      .where(eq(lessons.id, comment.lessonId))
+      .get();
+    if (!context) return;
+    const { course, lessonTitle } = context;
+
+    const isReply = comment.parentId !== null;
+    let recipientId = course.instructorId;
+    if (isReply) {
+      const question = db
+        .select()
+        .from(comments)
+        .where(eq(comments.id, comment.parentId!))
+        .get();
+      if (!question) return;
+      recipientId = question.userId;
+    }
+    if (recipientId === comment.userId) return;
+
+    const recipient = db
+      .select()
+      .from(users)
+      .where(eq(users.id, recipientId))
+      .get();
+    const author = db
+      .select()
+      .from(users)
+      .where(eq(users.id, comment.userId))
+      .get();
+    if (!recipient || !author) return;
+
+    const kind = isReply ? "discussion-reply" : "discussion-question";
+    const port = notifications ?? (await defaultNotifications());
+    await port.trigger({
+      kind,
+      category: isReply ? "discussion_replies" : "discussion_questions",
+      recipients: [
+        {
+          id: recipient.id,
+          name: recipient.name,
+          email: recipient.email,
+          avatarUrl: recipient.avatarUrl,
+        },
+      ],
+      actorId: author.id,
+      idempotencyKey: `${kind}:${comment.id}`,
+      data: {
+        commentId: comment.id,
+        lessonId: comment.lessonId,
+        lessonTitle,
+        authorName: author.name,
+        snippet: snippetOf(comment.body),
+        courseTitle: course.title,
+        courseSlug: course.slug,
+      },
+    });
+  });
+}
+
+/**
+ * `notified` settles once the Notification has been sent or has failed. It
+ * never rejects: a failing Notification never fails posting.
+ */
 export function createComment(
   db: Db,
   now: Date,
   userId: number,
   lessonId: number,
   parentId: number | null,
-  body: string
-) {
+  body: string,
+  notifications?: NotificationPort
+): { comment: Comment; notified: Promise<void> } {
   const trimmed = assertValidCommentBody(body);
 
   const course = db
@@ -59,7 +155,7 @@ export function createComment(
     }
   }
 
-  return db
+  const comment = db
     .insert(comments)
     .values({
       userId,
@@ -70,4 +166,6 @@ export function createComment(
     })
     .returning()
     .get();
+
+  return { comment, notified: announceComment(db, comment, notifications) };
 }

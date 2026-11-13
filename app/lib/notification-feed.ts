@@ -146,6 +146,25 @@ export function presentNotification(
           .join(" · "),
         destination: "/admin/refunds",
       };
+    case "discussion-question":
+    case "discussion-reply": {
+      const lessonTitle = text(data.lessonTitle);
+      const author = text(data.authorName) || "Someone";
+      const inLesson = lessonTitle ? ` in ${lessonTitle}` : "";
+      const hasAnchor =
+        courseSlug && data.lessonId != null && data.commentId != null;
+      return {
+        category: "discussion",
+        title:
+          kind === "discussion-question"
+            ? `${author} asked a question${inLesson}`
+            : `${author} replied to your question${inLesson}`,
+        snippet: text(data.snippet),
+        destination: hasAnchor
+          ? `/courses/${courseSlug}/lessons/${data.lessonId}#comment-${data.commentId}`
+          : null,
+      };
+    }
     default:
       return {
         category: "discussion",
