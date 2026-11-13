@@ -37,7 +37,11 @@ export type NotifiableUser = {
 
 export type NotificationData = Record<string, string | number | boolean | null>;
 
-export type NotificationKind = "refund-approved" | "refund-declined";
+export type NotificationKind =
+  | "refund-approved"
+  | "refund-declined"
+  | "seat-claimed"
+  | "enrollment-created";
 
 export type NotificationTrigger = {
   kind: NotificationKind;
