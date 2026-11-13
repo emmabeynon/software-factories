@@ -169,3 +169,49 @@ export function createComment(
 
   return { comment, notified: announceComment(db, comment, notifications) };
 }
+
+/**
+ * Soft-deletes a comment and, after that has committed, archives the
+ * Notifications it caused. Deleting a Discussion Question archives only the
+ * question's own Notification: Reply Notifications carry their own comment id
+ * and stay. `notified` never rejects.
+ */
+export function deleteComment(
+  db: Db,
+  now: Date,
+  commentId: number,
+  userId: number,
+  isStaff: boolean,
+  notifications?: NotificationPort
+): { comment: Comment; notified: Promise<void> } {
+  const existing = db
+    .select()
+    .from(comments)
+    .where(eq(comments.id, commentId))
+    .get();
+  if (!existing) {
+    throw new Error("Comment not found");
+  }
+  if (existing.userId !== userId && !isStaff) {
+    throw new Error("You can only delete your own comments");
+  }
+  if (existing.deletedAt !== null) {
+    return { comment: existing, notified: Promise.resolve() };
+  }
+
+  const comment = db
+    .update(comments)
+    .set({ deletedAt: now.toISOString() })
+    .where(eq(comments.id, commentId))
+    .returning()
+    .get();
+
+  const notified = bestEffort(
+    "archive of Discussion Notifications",
+    async () => {
+      const port = notifications ?? (await defaultNotifications());
+      await port.archiveForComment(comment.id);
+    }
+  );
+  return { comment, notified };
+}
